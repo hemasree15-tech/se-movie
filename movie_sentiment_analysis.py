@@ -41,11 +41,30 @@ from collections import Counter
 # =======================================================
 # SECTION 2: DATA LOADING
 # =======================================================
-# NOTE: This uses a movie review dataset (Positive / Negative only).
-# For the real IMDB dataset, download "IMDB Dataset of 50K Movie Reviews"
-# from Kaggle and convert columns to "text" and "sentiment" - see README.
+# Dataset: "IMDB Dataset of 50K Movie Reviews" (Kaggle)
+# File has 2 columns: "review" (the text) and "sentiment" (positive / negative).
+# We rename "review" -> "text" and write sentiment as "Positive" / "Negative"
+# so the rest of the code can stay the same.
+#
+# SAMPLE_SIZE: the full dataset has 50,000 reviews. SVM and Random Forest
+# become very slow on all 50,000, so by default we use a balanced random
+# sample (half Positive, half Negative). Set SAMPLE_SIZE = None to use
+# the complete dataset (expect a long run time, especially for SVM).
+SAMPLE_SIZE = 10000
 
-df = pd.read_csv("movie_reviews_dataset.csv")
+df = pd.read_csv("IMDB Dataset.csv")
+df = df.rename(columns={"review": "text"})
+df['sentiment'] = df['sentiment'].str.strip().str.capitalize()   # positive -> Positive
+
+print("Full dataset shape:", df.shape)
+
+# remove duplicates first so they do not appear in both train and test sets
+df = df.dropna().drop_duplicates()
+
+if SAMPLE_SIZE is not None and SAMPLE_SIZE < len(df):
+    df = df.groupby('sentiment', group_keys=False).sample(n=SAMPLE_SIZE // 2, random_state=42)
+    df = df.reset_index(drop=True)
+    print("Using a balanced sample of", SAMPLE_SIZE, "reviews for faster training.")
 
 print("First 5 rows:")
 print(df.head())
@@ -150,8 +169,8 @@ print("\nTop 10 Negative Words:", get_top_words(negative_text))
 # =======================================================
 # SECTION 8: FEATURE EXTRACTION (TF-IDF)
 # =======================================================
-tfidf = TfidfVectorizer(max_features=3000)
-X = tfidf.fit_transform(df['clean_text']).toarray()
+tfidf = TfidfVectorizer(max_features=5000)
+X = tfidf.fit_transform(df['clean_text'])   # sparse matrix (saves memory)
 y = df['sentiment']
 
 print("\nShape of feature matrix:", X.shape)
@@ -183,7 +202,7 @@ svm_model.fit(X_train, y_train)
 random_forest = RandomForestClassifier(n_estimators=100, random_state=42)
 random_forest.fit(X_train, y_train)
 
-xgb_model = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
+xgb_model = XGBClassifier(eval_metric='logloss')
 # XGBoost needs numeric labels (binary: Negative=0, Positive=1)
 y_train_num = y_train.map({'Negative': 0, 'Positive': 1})
 y_test_num = y_test.map({'Negative': 0, 'Positive': 1})
@@ -259,10 +278,10 @@ plt.show()
 # =======================================================
 # SECTION 14: ERROR ANALYSIS (WRONG PREDICTIONS)
 # =======================================================
-wrong_predictions = X_test[y_pred_best != np.array(best_ytest)]
-print("\nNumber of wrong predictions:", len(wrong_predictions))
-print("Total test samples:", len(X_test))
-print("Error rate:", round(len(wrong_predictions) / len(X_test) * 100, 2), "%")
+num_wrong = int((y_pred_best != np.array(best_ytest)).sum())
+print("\nNumber of wrong predictions:", num_wrong)
+print("Total test samples:", X_test.shape[0])
+print("Error rate:", round(num_wrong / X_test.shape[0] * 100, 2), "%")
 
 
 # =======================================================
@@ -270,7 +289,7 @@ print("Error rate:", round(len(wrong_predictions) / len(X_test) * 100, 2), "%")
 # =======================================================
 def predict_sentiment(text):
     cleaned = clean_text(text)
-    vector = tfidf.transform([cleaned]).toarray()
+    vector = tfidf.transform([cleaned])
 
     prediction = log_reg.predict(vector)[0]
     probability = log_reg.predict_proba(vector)[0]
@@ -291,6 +310,16 @@ def predict_sentiment(text):
 predict_sentiment("This movie was an absolute masterpiece, the acting and direction were phenomenal!")
 predict_sentiment("Terrible film, the plot made no sense and the acting was wooden.")
 predict_sentiment("The cinematography was stunning but the story dragged on too long.")
+
+# NOTE: the model is trained on full-length IMDB reviews (many sentences),
+# so it is more reliable on longer reviews than on one-line comments.
+predict_sentiment("I went in with low expectations, but this film completely won me over. "
+                  "The story is moving, the lead performances feel genuine, and the final "
+                  "act had me close to tears. One of the best movies I have seen this year, "
+                  "and I would happily watch it again.")
+predict_sentiment("What a waste of two hours. The script is full of cliches, the dialogue is "
+                  "painful to listen to, and the so-called twist is obvious from the first "
+                  "ten minutes. I regret watching this and would not recommend it to anyone.")
 
 
 print("\n===================================================")
